@@ -6,21 +6,51 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	_ "embed"
 	"fmt"
 	"log"
 	"os"
 	"strconv"
 	"strings"
+	"text/template"
 
 	"github.com/drone/drone-go/drone"
 	"github.com/google/go-github/v43/github"
 	"golang.org/x/oauth2"
 )
 
+// templateContext bundles a number of named properties that can be referenced
+// in a text/template body.
+type templateContext struct {
+	BuildNumber int
+	DroneServer string
+	Logs        []string
+	PullRequest string
+	RepoName    string
+	RepoOwner   string
+	SHA         string
+	StageName   string
+	StageNumber int
+	Status      string
+	StepName    string
+	StepNumber  int
+}
+
 // version is used to hold the version string. Is replaced at go build time
 // with -ldflags.
 var version = "development"
+
+// commentTemplateRaw is an embedded file which contains a text/template body.
+// Will be used to format logs (and other information) from a DroneCI step as a
+// GitHub markdown comment.
+//go:embed comment.tpl
+var commentTemplateRaw string
+
+// commentTemplate is parsed from the above raw template. Any syntax errors in
+// the template body will result in an immediate panic at runtime.
+var commentTemplate = template.Must(template.New("comment.tpl").Parse(commentTemplateRaw))
 
 func main() {
 	if err := mainCmd(); err != nil {
@@ -36,6 +66,12 @@ func mainCmd() error {
 	// Example: 42
 	// See: https://docs.drone.io/pipeline/environment/reference/drone-build-number/
 	droneBuildNumber := os.Getenv("DRONE_BUILD_NUMBER")
+
+	// droneCommitSHA is the git SHA of the commit that started the current
+	// DroneCI build.
+	// Example: bcdd4bf0245c82c060407b3b24b9b87301d15ac1
+	// See: https://docs.drone.io/pipeline/environment/reference/drone-commit-sha/
+	droneCommitSHA := os.Getenv("DRONE_COMMIT_SHA")
 
 	// dronePullRequest is the pull request number that this build is running
 	// on behalf of. Only present in build from the pull_request event.
@@ -103,6 +139,8 @@ func mainCmd() error {
 		return nil
 	case droneBuildNumber == "":
 		return fmt.Errorf("DRONE_BUILD_NUMBER was not provided")
+	case droneCommitSHA == "":
+		return fmt.Errorf("DRONE_COMMIT_SHA was not provided")
 	case droneRepoName == "":
 		return fmt.Errorf("DRONE_REPO_NAME was not provided")
 	case droneRepoOwner == "":
@@ -170,7 +208,7 @@ func mainCmd() error {
 	// These names are only a convenience for the plugin, the stage and step
 	// numbers is what the DroneCI API actually needs to fetch step logs.
 	log.Printf("searching for stage %s step %s", pluginStage, pluginStep)
-	stageNumber, stepNumber, found := resolveBuildStageAndStep(build, pluginStage, pluginStep)
+	stageNumber, stepNumber, status, found := resolveBuildStageAndStep(build, pluginStage, pluginStep)
 	if !found {
 		// The full set of stage and step names are fully known at DroneCI
 		// build time, so this indicates a plugin misconfiguration. Possibly as
@@ -185,17 +223,40 @@ func mainCmd() error {
 		return err
 	}
 
-	// Only print log lines for now.
+	// Keep just the log message for all the fetched log lines.
+	var logs []string
 	for _, line := range lines {
-		log.Println("| ", strings.TrimRight(line.Message, "\n"))
+		logs = append(logs, strings.TrimRight(line.Message, "\n"))
 	}
+
+	// Format a GitHub comment body.
+	comment, err := templateComment(templateContext{
+		BuildNumber: droneBuildNumberInt,
+		DroneServer: droneServer,
+		Logs:        logs,
+		PullRequest: dronePullRequest,
+		RepoName:    droneRepoName,
+		RepoOwner:   droneRepoOwner,
+		SHA:         droneCommitSHA,
+		StageName:   pluginStage,
+		StageNumber: stageNumber,
+		Status:      status,
+		StepName:    pluginStep,
+		StepNumber:  stepNumber,
+	})
+	if err != nil {
+		return err
+	}
+
+	// Only print comment body for now.
+	log.Printf("Templated comment:\n%s", comment)
 
 	return nil
 }
 
 // resolveBuildStageAndStep takes a named build stage and a named build step
 // and resolved them into a stage number and a step number.
-func resolveBuildStageAndStep(build *drone.Build, stageName, stepName string) (int, int, bool) {
+func resolveBuildStageAndStep(build *drone.Build, stageName, stepName string) (int, int, string, bool) {
 	for _, stage := range build.Stages {
 		// If the current stage name doesn't match, move onto the next stage.
 		if stage.Name != stageName {
@@ -209,7 +270,7 @@ func resolveBuildStageAndStep(build *drone.Build, stageName, stepName string) (i
 			}
 			// The names step and stage were found! Return the resolved stage
 			// and step numbers.
-			return stage.Number, step.Number, true
+			return stage.Number, step.Number, step.Status, true
 		}
 
 		// Since stage names are unique, and we have already examined a step
@@ -219,5 +280,13 @@ func resolveBuildStageAndStep(build *drone.Build, stageName, stepName string) (i
 	}
 
 	// The names stage and step could not be found.
-	return 0, 0, false
+	return 0, 0, "", false
+}
+
+// templateComment takes a set of typed parameters and formats a GitHub comment
+// body using a template.
+func templateComment(params templateContext) (string, error) {
+	buf := bytes.Buffer{}
+	err := commentTemplate.Execute(&buf, params)
+	return buf.String(), err
 }
