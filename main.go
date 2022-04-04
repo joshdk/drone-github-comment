@@ -131,6 +131,11 @@ func mainCmd() error {
 	// Example: lint-code
 	pluginStep := os.Getenv("PLUGIN_STEP")
 
+	// pluginWhen determines if logs from a successful step, or a failing step
+	// (or both) should be posted as a comment.
+	// Example: success|failure|always
+	pluginWhen := os.Getenv("PLUGIN_WHEN")
+
 	// Validate that various settings are not empty. Ordered roughly by what
 	// things that are most important to flag first. For example, validating
 	// that vital build metadata is even present comes before validating that
@@ -234,6 +239,50 @@ func mainCmd() error {
 		return fmt.Errorf("build stage and step could not be found")
 	}
 
+	// If keep is set to true, then this can be skipped. No need to bother
+	// listing and deleting existing pull request comments.
+	if !pluginKeepBool {
+		// Get a list of all existing comments. Treat this as optional, so just
+		// return without error if listing fails.
+		existingComments, _, err := githubClient.Issues.ListComments(ctx, droneRepoOwner, droneRepoName, dronePullRequestInt, nil)
+		if err != nil {
+			log.Printf("failed to list existing existing")
+		}
+
+		// Check every single existing pull request comment, and determine whether
+		// it should be deleted.
+		for _, existingComment := range existingComments {
+			// If the user who posted the comment doesn't match our current user,
+			// then skip it.
+			if existingComment.GetUser().GetLogin() != githubUser.GetLogin() {
+				continue
+			}
+
+			// Attempt to delete this comment. Treat this as optional, so just
+			// continue without error if deleting fails.
+			if _, err := githubClient.Issues.DeleteComment(ctx, droneRepoOwner, droneRepoName, existingComment.GetID()); err != nil {
+				log.Printf("failed to delete comment %s", existingComment.GetHTMLURL())
+				continue
+			}
+
+			log.Printf("deleted comment %s", existingComment.GetHTMLURL())
+		}
+	}
+
+	// Check if we can skip posting a new comment (also fetching logs and
+	// templating said comment) based on the status of the target step.
+	if status == drone.StatusPassing && pluginWhen == "failure" {
+		// Target step is passing, but we only want to post a comment when it
+		// fails, so there is nothing more to do here.
+		log.Println("not commenting since step passed")
+		return nil
+	} else if status == drone.StatusFailing && pluginWhen == "success" {
+		// Target step is failing, but we only want to post a comment when it
+		// succeeds, so there is nothing more to do here.
+		log.Println("not commenting since step failed")
+		return nil
+	}
+
 	// Fetch logs for the resolved build stage and step.
 	log.Printf("fetching logs for %s/%s/%s/%d/%d/%d", droneServer, droneRepoOwner, droneRepoName, droneBuildNumberInt, stageNumber, stepNumber)
 	lines, err := droneClient.Logs(droneRepoOwner, droneRepoName, droneBuildNumberInt, stageNumber, stepNumber)
@@ -276,45 +325,6 @@ func mainCmd() error {
 		return err
 	}
 	log.Printf("created comment %s", createdComment.GetHTMLURL())
-
-	// If keep is set to true, then we're all done. No need to bother listing
-	// and deleting existing pull request comments.
-	if pluginKeepBool {
-		return nil
-	}
-
-	// Get a list of all existing comments. Treat this as optional, so just
-	// return without error if listing fails.
-	existingComments, _, err := githubClient.Issues.ListComments(ctx, droneRepoOwner, droneRepoName, dronePullRequestInt, nil)
-	if err != nil {
-		log.Printf("failed to list existing existing")
-		return nil // nolint:nilerr
-	}
-
-	// Check every single existing pull request comment, and determine whether
-	// it should be deleted.
-	for _, existingComment := range existingComments {
-		// If the user who posted the comment doesn't match our current user,
-		// then skip it.
-		if existingComment.GetUser().GetLogin() != githubUser.GetLogin() {
-			continue
-		}
-
-		// If the comment ID matched that of the comment we just posted, then
-		// skip it.
-		if existingComment.GetID() == createdComment.GetID() {
-			continue
-		}
-
-		// Attempt to delete this comment. Treat this as optional, so just
-		// continue without error if deleting fails.
-		if _, err := githubClient.Issues.DeleteComment(ctx, droneRepoOwner, droneRepoName, existingComment.GetID()); err != nil {
-			log.Printf("failed to delete comment %s", existingComment.GetHTMLURL())
-			continue
-		}
-
-		log.Printf("deleted comment %s", existingComment.GetHTMLURL())
-	}
 
 	return nil
 }

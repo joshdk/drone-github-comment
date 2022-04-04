@@ -3,6 +3,8 @@ linters:
   disable:
     - cyclop
     - funlen
+    - gocognit
+    - gocyclo
     - goerr113
     - golint
     - interfacer
