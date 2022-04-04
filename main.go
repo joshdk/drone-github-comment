@@ -50,6 +50,7 @@ var commentTemplateRaw string
 
 // commentTemplate is parsed from the above raw template. Any syntax errors in
 // the template body will result in an immediate panic at runtime.
+// nolint:gochecknoglobals
 var commentTemplate = template.Must(template.New("comment.tpl").Parse(commentTemplateRaw))
 
 func main() {
@@ -188,14 +189,14 @@ func mainCmd() error {
 	// Construct a DroneCI API client using the provided token, proto, and
 	// hostname.
 	droneTokenClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: droneToken},
+		&oauth2.Token{AccessToken: droneToken}, // nolint:exhaustivestruct
 	))
 	droneServer := fmt.Sprintf("%s://%s", droneSystemProto, droneSystemHostname)
 	droneClient := drone.NewClient(droneServer, droneTokenClient)
 
 	// Construct a GitHub API client using the provided token.
 	githubTokenClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: githubToken},
+		&oauth2.Token{AccessToken: githubToken}, // nolint:exhaustivestruct
 	))
 	githubClient := github.NewClient(githubTokenClient)
 
@@ -241,7 +242,7 @@ func mainCmd() error {
 	}
 
 	// Keep just the log message for all the fetched log lines.
-	var logs []string
+	logs := make([]string, 0, len(lines))
 	for _, line := range lines {
 		logs = append(logs, strings.TrimRight(line.Message, "\n"))
 	}
@@ -267,6 +268,7 @@ func mainCmd() error {
 	log.Printf("templated comment:\n%s", comment)
 
 	// Create a comment on the underlying pull request.
+	// nolint:exhaustivestruct
 	createdComment, _, err := githubClient.Issues.CreateComment(ctx, droneRepoOwner, droneRepoName, dronePullRequestInt, &github.IssueComment{
 		Body: github.String(comment),
 	})
@@ -286,7 +288,7 @@ func mainCmd() error {
 	existingComments, _, err := githubClient.Issues.ListComments(ctx, droneRepoOwner, droneRepoName, dronePullRequestInt, nil)
 	if err != nil {
 		log.Printf("failed to list existing existing")
-		return nil
+		return nil // nolint:nilerr
 	}
 
 	// Check every single existing pull request comment, and determine whether

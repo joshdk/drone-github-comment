@@ -14,3 +14,9 @@ jobs:
 
       - name: Run commitlint
         uses: wagoid/commitlint-github-action@v4
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v2
+        with:
+          # https://github.com/golangci/golangci-lint/releases/tag/v1.45.2
+          version: v1.45.2
