@@ -27,7 +27,7 @@ type templateContext struct {
 	BuildNumber int
 	DroneServer string
 	Logs        []string
-	PullRequest string
+	PullRequest int
 	RepoName    string
 	RepoOwner   string
 	SHA         string
@@ -165,6 +165,12 @@ func mainCmd() error {
 		return err
 	}
 
+	// Parse the drone pull request number to ensure that it's valid.
+	dronePullRequestInt, err := strconv.Atoi(dronePullRequest)
+	if err != nil {
+		return err
+	}
+
 	// Shared context for all requests going forward.
 	ctx := context.Background()
 
@@ -234,7 +240,7 @@ func mainCmd() error {
 		BuildNumber: droneBuildNumberInt,
 		DroneServer: droneServer,
 		Logs:        logs,
-		PullRequest: dronePullRequest,
+		PullRequest: dronePullRequestInt,
 		RepoName:    droneRepoName,
 		RepoOwner:   droneRepoOwner,
 		SHA:         droneCommitSHA,
@@ -247,9 +253,16 @@ func mainCmd() error {
 	if err != nil {
 		return err
 	}
+	log.Printf("templated comment:\n%s", comment)
 
-	// Only print comment body for now.
-	log.Printf("Templated comment:\n%s", comment)
+	// Create a comment on the underlying pull request.
+	createdComment, _, err := githubClient.Issues.CreateComment(ctx, droneRepoOwner, droneRepoName, dronePullRequestInt, &github.IssueComment{
+		Body: github.String(comment),
+	})
+	if err != nil {
+		return err
+	}
+	log.Printf("created comment %s", createdComment.GetHTMLURL())
 
 	return nil
 }
