@@ -136,6 +136,13 @@ func mainCmd() error {
 	// Example: success|failure|always
 	pluginWhen := os.Getenv("PLUGIN_WHEN")
 
+	// pluginVerbatim determines whether log lines that start with a "+" sign
+	// are kept when templating out a comment. Such log lines are commonly seen
+	// since step commands are run with set -e. Defaults to false, which drops
+	// log lines that start with a "+" sign.
+	// Example: true
+	pluginVerbatim := os.Getenv("PLUGIN_VERBATIM")
+
 	// Validate that various settings are not empty. Ordered roughly by what
 	// things that are most important to flag first. For example, validating
 	// that vital build metadata is even present comes before validating that
@@ -186,6 +193,12 @@ func mainCmd() error {
 	pluginKeepBool, err := strconv.ParseBool(pluginKeep)
 	if err != nil {
 		pluginKeepBool = false
+	}
+
+	// Parse the plugin verbatim parameter, and default to false on error.
+	pluginVerbatimBool, err := strconv.ParseBool(pluginVerbatim)
+	if err != nil {
+		pluginVerbatimBool = false
 	}
 
 	// Shared context for all requests going forward.
@@ -293,7 +306,11 @@ func mainCmd() error {
 	// Keep just the log message for all the fetched log lines.
 	logs := make([]string, 0, len(lines))
 	for _, line := range lines {
-		logs = append(logs, strings.TrimRight(line.Message, "\n"))
+		log := strings.TrimRight(line.Message, "\n")
+		// Check if this log line should be dropped.
+		if pluginVerbatimBool || !strings.HasPrefix(log, "+") {
+			logs = append(logs, log)
+		}
 	}
 
 	// Format a GitHub comment body.
