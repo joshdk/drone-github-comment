@@ -305,6 +305,13 @@ func mainCmd() error {
 		}
 	}
 
+	// It doesn't make sense to take logs from steps that haven't completely
+	// finished running. This indicates a plugin misconfiguration, as the
+	// plugin should only be run after the target step succeeds or fails.
+	if status != drone.StatusPassing && status != drone.StatusFailing {
+		return fmt.Errorf("target step status is %s", status)
+	}
+
 	// Check if we can skip posting a new comment (also fetching logs and
 	// templating said comment) based on the status of the target step.
 	if status == drone.StatusPassing && pluginWhen == "failure" {
