@@ -6,12 +6,14 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"text/template"
@@ -26,6 +28,7 @@ import (
 type templateContext struct {
 	BuildNumber int
 	DroneServer string
+	Labels      map[string]string
 	Logs        []string
 	PullRequest int
 	RepoName    string
@@ -52,6 +55,11 @@ var commentTemplateRaw string
 // the template body will result in an immediate panic at runtime.
 // nolint:gochecknoglobals
 var commentTemplate = template.Must(template.New("comment.tpl").Parse(commentTemplateRaw))
+
+// regexMarkdownMetadata is a regex that matches specifically formatted
+// invisible markdown comments of the form:
+//   [//]: # (key=value)
+var regexMarkdownMetadata = regexp.MustCompile(`^\[//\]: # \(([^=]+)=(.*)\)`)
 
 func main() {
 	if err := mainCmd(); err != nil {
@@ -252,6 +260,13 @@ func mainCmd() error {
 		return fmt.Errorf("build stage and step could not be found")
 	}
 
+	// labels is a set of key value pairs that is embedded into the pull
+	// request comment markdown as metadata.
+	labels := map[string]string{
+		"stage": pluginStage,
+		"step":  pluginStep,
+	}
+
 	// If keep is set to true, then this can be skipped. No need to bother
 	// listing and deleting existing pull request comments.
 	if !pluginKeepBool {
@@ -268,6 +283,14 @@ func mainCmd() error {
 			// If the user who posted the comment doesn't match our current user,
 			// then skip it.
 			if existingComment.GetUser().GetLogin() != githubUser.GetLogin() {
+				continue
+			}
+
+			// Check if the comment has labels that correspond with this
+			// instance of the plugin. This is to prevent improper deletion of
+			// comments posted by an additional instance of the plugin being
+			// run in the same build pipeline.
+			if !hasMarkdownLabels(existingComment.GetBody(), labels) {
 				continue
 			}
 
@@ -317,6 +340,7 @@ func mainCmd() error {
 	comment, err := templateComment(templateContext{
 		BuildNumber: droneBuildNumberInt,
 		DroneServer: droneServer,
+		Labels:      labels,
 		Logs:        logs,
 		PullRequest: dronePullRequestInt,
 		RepoName:    droneRepoName,
@@ -344,6 +368,44 @@ func mainCmd() error {
 	log.Printf("created comment %s", createdComment.GetHTMLURL())
 
 	return nil
+}
+
+// hasMarkdownLabels checks if the given comment contains all the given
+// labels as markdown metadata. A markdown label is an invisible comment that
+// takes the form:
+//   [//]: # (key=value)
+func hasMarkdownLabels(comment string, labels map[string]string) bool {
+	// extracted is a set of key value pairs that were found inside the
+	// markdown comment.
+	extracted := make(map[string]string)
+
+	// Scan the input comment one line at a time.
+	for scanner := bufio.NewScanner(strings.NewReader(comment)); scanner.Scan(); {
+		line := scanner.Text()
+
+		// Attempt to match the current line against the markdown metadata
+		// regex. If there are exactly three matches (the whole string, the
+		// key, and the value) then add the key and value to our set of
+		// extracted pairs.
+		match := regexMarkdownMetadata.FindStringSubmatch(line)
+		if len(match) == 3 { // nolint:gomnd
+			key := strings.TrimSpace(match[1])
+			val := strings.TrimSpace(match[2])
+			extracted[key] = val
+		}
+	}
+
+	// Check that the given set of labels is a subset of the labels extracted
+	// from the given comment.
+	for labelKey, labelVal := range labels {
+		if extractedVal, ok := extracted[labelKey]; !ok || extractedVal != labelVal {
+			// Either one of the given keys wasn't found, or the value at that
+			// key did not match.
+			return false
+		}
+	}
+
+	return true
 }
 
 // resolveBuildStageAndStep takes a named build stage and a named build step
