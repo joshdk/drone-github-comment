@@ -343,6 +343,9 @@ func mainCmd() error {
 		}
 	}
 
+	// Discard any blank leading or trailing log lines.
+	logs = trimBlankLogs(logs)
+
 	// Format a GitHub comment body.
 	comment, err := templateComment(templateContext{
 		BuildNumber: droneBuildNumberInt,
@@ -450,4 +453,31 @@ func templateComment(params templateContext) (string, error) {
 	buf := bytes.Buffer{}
 	err := commentTemplate.Execute(&buf, params)
 	return buf.String(), err
+}
+
+// trimBlankLogs discards any blank leading or trailing log lines. Blank lines
+// surrounded by non-blank lines are kept intact.
+func trimBlankLogs(logs []string) []string {
+	// Starting from the front, discard any lines that are completely blank.
+	// Break out when the first non-blank line is found.
+	for len(logs) > 0 {
+		if strings.TrimSpace(logs[0]) != "" {
+			break
+		}
+		// Discard the first item.
+		logs = logs[1:]
+	}
+
+	// Starting from the back, discard any lines that are completely blank.
+	// Break out when the first (actually the last) non-blank line is found.
+	for len(logs) > 0 {
+		if strings.TrimSpace(logs[len(logs)-1]) != "" {
+			break
+		}
+		// Discard the last item.
+		logs = logs[:len(logs)-1]
+	}
+
+	// Return whatever remains
+	return logs
 }
