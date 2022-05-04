@@ -129,15 +129,10 @@ func mainCmd() error {
 	// Example: true
 	pluginKeep := os.Getenv("PLUGIN_KEEP")
 
-	// pluginStage is a named build stage which will be used in conjunction
-	// with PLUGIN_STEP to find step logs.
-	// Example: build-pull-request
-	pluginStage := os.Getenv("PLUGIN_STAGE")
-
-	// pluginStep is a named build step which will be used in conjunction with
-	// PLUGIN_STAGE to find step logs.
-	// Example: lint-code
-	pluginStep := os.Getenv("PLUGIN_STEP")
+	// pluginStepFull is a named build stage and step which will be used for
+	// finding logs.
+	// Example: build-pull-request/lint-code
+	pluginStepFull := os.Getenv("PLUGIN_STEP")
 
 	// pluginWhen determines if logs from a successful step, or a failing step
 	// (or both) should be posted as a comment.
@@ -179,9 +174,7 @@ func mainCmd() error {
 		return fmt.Errorf("DRONE_TOKEN was not provided")
 	case githubToken == "":
 		return fmt.Errorf("GITHUB_TOKEN was not provided")
-	case pluginStage == "":
-		return fmt.Errorf("PLUGIN_STAGE was not provided")
-	case pluginStep == "":
+	case pluginStepFull == "":
 		return fmt.Errorf("PLUGIN_STEP was not provided")
 	}
 
@@ -201,6 +194,16 @@ func mainCmd() error {
 	pluginKeepBool, err := strconv.ParseBool(pluginKeep)
 	if err != nil {
 		pluginKeepBool = false
+	}
+
+	// Spit the stage and step values from the combined plugin setting.
+	var pluginStage, pluginStep string
+	parts := strings.Split(pluginStepFull, "/")
+	switch len(parts) {
+	case 2: // nolint:gomnd
+		pluginStage, pluginStep = parts[0], parts[1]
+	default:
+		return fmt.Errorf("PLUGIN_STEP was malformed")
 	}
 
 	// Parse the plugin verbatim parameter, and default to false on error.
