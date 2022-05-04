@@ -29,7 +29,7 @@ steps:
       from_secret: GITHUB_TOKEN
 ```
 
-You then need to configure a target pipeline `stage` and `step` name that refers to another existing step.
+You then need to configure a target `step` name that refers to existing pipeline step.
 
 ```yaml
 kind: pipeline
@@ -42,8 +42,7 @@ steps:
 - name: drone-github-comment
   image: ghcr.io/joshdk/drone-github-comment:v0.1.0
   settings:
-    stage: build-pull-request
-    step: lint-code
+    step: build-pull-request/lint-code
 ```
 
 You must also configure the `depends_on` values, since this plugin must be run after the target step finishes.
