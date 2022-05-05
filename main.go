@@ -200,6 +200,8 @@ func mainCmd() error {
 	var pluginStage, pluginStep string
 	parts := strings.Split(pluginStepFull, "/")
 	switch len(parts) {
+	case 1:
+		pluginStage, pluginStep = "", parts[0]
 	case 2: // nolint:gomnd
 		pluginStage, pluginStep = parts[0], parts[1]
 	default:
@@ -254,13 +256,13 @@ func mainCmd() error {
 	// Resolve the named build stage and step into a stage and step number.
 	// These names are only a convenience for the plugin, the stage and step
 	// numbers is what the DroneCI API actually needs to fetch step logs.
-	log.Printf("searching for stage %s step %s", pluginStage, pluginStep)
-	stageNumber, stepNumber, status, found := resolveBuildStageAndStep(build, pluginStage, pluginStep)
-	if !found {
+	log.Printf("searching for step %s", fullName(pluginStage, pluginStep))
+	stageNumber, stepNumber, status, err := resolveBuildStageAndStep(build, pluginStage, pluginStep)
+	if err != nil {
 		// The full set of stage and step names are fully known at DroneCI
 		// build time, so this indicates a plugin misconfiguration. Possibly as
 		// the result of the target stage or step being renamed.
-		return fmt.Errorf("build stage and step could not be found")
+		return err
 	}
 
 	// labels is a set of key value pairs that is embedded into the pull
@@ -423,10 +425,22 @@ func hasMarkdownLabels(comment string, labels map[string]string) bool {
 
 // resolveBuildStageAndStep takes a named build stage and a named build step
 // and resolved them into a stage number and a step number.
-func resolveBuildStageAndStep(build *drone.Build, stageName, stepName string) (int, int, string, bool) {
+func resolveBuildStageAndStep(build *drone.Build, stageName, stepName string) (int, int, string, error) {
+	var (
+		stageNumber int
+		stepNumber  int
+		status      string
+
+		// count is how many times a matching stage/step has been encountered.
+		// Used to track if a step exists at all, or potentially if there are
+		// duplicate (ambiguous) step names
+		count int
+	)
+
 	for _, stage := range build.Stages {
 		// If the current stage name doesn't match, move onto the next stage.
-		if stage.Name != stageName {
+		// If the target stage name is empty, then check all stages.
+		if stage.Name != stageName && stageName != "" {
 			continue
 		}
 
@@ -435,19 +449,35 @@ func resolveBuildStageAndStep(build *drone.Build, stageName, stepName string) (i
 			if step.Name != stepName {
 				continue
 			}
-			// The names step and stage were found! Return the resolved stage
-			// and step numbers.
-			return stage.Number, step.Number, step.Status, true
-		}
 
-		// Since stage names are unique, and we have already examined a step
-		// with a matching name, there is nothing more to do here. Break out
-		// and let the final failure case handle it.
-		break
+			// The names step and stage were found!
+			stageNumber = stage.Number
+			stepNumber = step.Number
+			status = step.Status
+			count++
+		}
 	}
 
-	// The names stage and step could not be found.
-	return 0, 0, "", false
+	switch count {
+	case 0:
+		// The target step does not exist.
+		return 0, 0, "", fmt.Errorf("nonexistent step name %s", fullName(stageName, stepName))
+	case 1:
+		// The target step was found!
+		return stageNumber, stepNumber, status, nil
+	default:
+		// There were multiple steps with the same target name. It's unsafe to
+		// just pick one in this case, so error out.
+		return 0, 0, "", fmt.Errorf("ambiguous step name %s", fullName(stageName, stepName))
+	}
+}
+
+// fullName formats a pretty name for the given stage and step.
+func fullName(stage, step string) string {
+	if stage == "" {
+		return step
+	}
+	return fmt.Sprintf("%s/%s", stage, step)
 }
 
 // templateComment takes a set of typed parameters and formats a GitHub comment

@@ -30,6 +30,7 @@ steps:
 ```
 
 You then need to configure a target `step` name that refers to existing pipeline step.
+You can either specify both the stage/step name, like `build-pull-request/lint-code` in the example below, or just the step name for convenience.
 
 ```yaml
 kind: pipeline
@@ -43,6 +44,7 @@ steps:
   image: ghcr.io/joshdk/drone-github-comment:v0.1.0
   settings:
     step: build-pull-request/lint-code
+    #step: lint-code
 ```
 
 You must also configure the `depends_on` values, since this plugin must be run after the target step finishes.
