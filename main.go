@@ -23,22 +23,28 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// target bundles a number of initial, and subsequently resolvable, properties
+// for a single build step.
+type target struct {
+	StageName   string
+	StageNumber int
+	StepName    string
+	StepNumber  int
+	Status      string
+	Logs        []string
+}
+
 // templateContext bundles a number of named properties that can be referenced
 // in a text/template body.
 type templateContext struct {
 	BuildNumber int
 	DroneServer string
 	Labels      map[string]string
-	Logs        []string
 	PullRequest int
 	RepoName    string
 	RepoOwner   string
 	SHA         string
-	StageName   string
-	StageNumber int
-	Status      string
-	StepName    string
-	StepNumber  int
+	target
 }
 
 // version is used to hold the version string. Is replaced at go build time
@@ -197,13 +203,12 @@ func mainCmd() error {
 	}
 
 	// Spit the stage and step values from the combined plugin setting.
-	var pluginStage, pluginStep string
-	parts := strings.Split(pluginStepFull, "/")
-	switch len(parts) {
+	var target target
+	switch parts := strings.Split(pluginStepFull, "/"); len(parts) {
 	case 1:
-		pluginStage, pluginStep = "", parts[0]
+		target.StageName, target.StepName = "", parts[0]
 	case 2: // nolint:gomnd
-		pluginStage, pluginStep = parts[0], parts[1]
+		target.StageName, target.StepName = parts[0], parts[1]
 	default:
 		return fmt.Errorf("PLUGIN_STEP was malformed")
 	}
@@ -256,9 +261,8 @@ func mainCmd() error {
 	// Resolve the named build stage and step into a stage and step number.
 	// These names are only a convenience for the plugin, the stage and step
 	// numbers is what the DroneCI API actually needs to fetch step logs.
-	log.Printf("searching for step %s", fullName(pluginStage, pluginStep))
-	stageNumber, stepNumber, status, err := resolveBuildStageAndStep(build, pluginStage, pluginStep)
-	if err != nil {
+	log.Printf("searching for step %s", fullName(target.StageName, target.StepName))
+	if err := resolveBuildStageAndStep(build, &target); err != nil {
 		// The full set of stage and step names are fully known at DroneCI
 		// build time, so this indicates a plugin misconfiguration. Possibly as
 		// the result of the target stage or step being renamed.
@@ -268,8 +272,8 @@ func mainCmd() error {
 	// labels is a set of key value pairs that is embedded into the pull
 	// request comment markdown as metadata.
 	labels := map[string]string{
-		"stage": pluginStage,
-		"step":  pluginStep,
+		"stage": target.StageName,
+		"step":  target.StepName,
 	}
 
 	// If keep is set to true, then this can be skipped. No need to bother
@@ -313,18 +317,18 @@ func mainCmd() error {
 	// It doesn't make sense to take logs from steps that haven't completely
 	// finished running. This indicates a plugin misconfiguration, as the
 	// plugin should only be run after the target step succeeds or fails.
-	if status != drone.StatusPassing && status != drone.StatusFailing {
-		return fmt.Errorf("target step status is %s", status)
+	if target.Status != drone.StatusPassing && target.Status != drone.StatusFailing {
+		return fmt.Errorf("target step status is %s", target.Status)
 	}
 
 	// Check if we can skip posting a new comment (also fetching logs and
 	// templating said comment) based on the status of the target step.
-	if status == drone.StatusPassing && pluginWhen == "failure" {
+	if target.Status == drone.StatusPassing && pluginWhen == "failure" {
 		// Target step is passing, but we only want to post a comment when it
 		// fails, so there is nothing more to do here.
 		log.Println("not commenting since step passed")
 		return nil
-	} else if status == drone.StatusFailing && pluginWhen == "success" {
+	} else if target.Status == drone.StatusFailing && pluginWhen == "success" {
 		// Target step is failing, but we only want to post a comment when it
 		// succeeds, so there is nothing more to do here.
 		log.Println("not commenting since step failed")
@@ -332,8 +336,8 @@ func mainCmd() error {
 	}
 
 	// Fetch logs for the resolved build stage and step.
-	log.Printf("fetching logs for %s/%s/%s/%d/%d/%d", droneServer, droneRepoOwner, droneRepoName, droneBuildNumberInt, stageNumber, stepNumber)
-	lines, err := droneClient.Logs(droneRepoOwner, droneRepoName, droneBuildNumberInt, stageNumber, stepNumber)
+	log.Printf("fetching logs for %s/%s/%s/%d/%d/%d", droneServer, droneRepoOwner, droneRepoName, droneBuildNumberInt, target.StageNumber, target.StepNumber)
+	lines, err := droneClient.Logs(droneRepoOwner, droneRepoName, droneBuildNumberInt, target.StageNumber, target.StepNumber)
 	if err != nil {
 		return err
 	}
@@ -349,23 +353,25 @@ func mainCmd() error {
 	}
 
 	// Discard any blank leading or trailing log lines.
-	logs = trimBlankLogs(logs)
+	target.Logs = trimBlankLogs(logs)
+
+	// Target step didn't have any logs (potentially after dropping/trimming
+	// lines) so avoid posting a blank message.
+	if len(target.Logs) == 0 {
+		log.Println("not commenting since step had no logs")
+		return nil
+	}
 
 	// Format a GitHub comment body.
 	comment, err := templateComment(templateContext{
 		BuildNumber: droneBuildNumberInt,
 		DroneServer: droneServer,
 		Labels:      labels,
-		Logs:        logs,
 		PullRequest: dronePullRequestInt,
 		RepoName:    droneRepoName,
 		RepoOwner:   droneRepoOwner,
 		SHA:         droneCommitSHA,
-		StageName:   pluginStage,
-		StageNumber: stageNumber,
-		Status:      status,
-		StepName:    pluginStep,
-		StepNumber:  stepNumber,
+		target:      target,
 	})
 	if err != nil {
 		return err
@@ -425,11 +431,10 @@ func hasMarkdownLabels(comment string, labels map[string]string) bool {
 
 // resolveBuildStageAndStep takes a named build stage and a named build step
 // and resolved them into a stage number and a step number.
-func resolveBuildStageAndStep(build *drone.Build, stageName, stepName string) (int, int, string, error) {
+func resolveBuildStageAndStep(build *drone.Build, target *target) error {
 	var (
-		stageNumber int
-		stepNumber  int
-		status      string
+		stageName = target.StageName
+		stepName  = target.StepName
 
 		// count is how many times a matching stage/step has been encountered.
 		// Used to track if a step exists at all, or potentially if there are
@@ -451,9 +456,10 @@ func resolveBuildStageAndStep(build *drone.Build, stageName, stepName string) (i
 			}
 
 			// The names step and stage were found!
-			stageNumber = stage.Number
-			stepNumber = step.Number
-			status = step.Status
+			target.StageName = stage.Name
+			target.StageNumber = stage.Number
+			target.StepNumber = step.Number
+			target.Status = step.Status
 			count++
 		}
 	}
@@ -461,14 +467,14 @@ func resolveBuildStageAndStep(build *drone.Build, stageName, stepName string) (i
 	switch count {
 	case 0:
 		// The target step does not exist.
-		return 0, 0, "", fmt.Errorf("nonexistent step name %s", fullName(stageName, stepName))
+		return fmt.Errorf("nonexistent step name %s", fullName(stageName, stepName))
 	case 1:
 		// The target step was found!
-		return stageNumber, stepNumber, status, nil
+		return nil
 	default:
 		// There were multiple steps with the same target name. It's unsafe to
 		// just pick one in this case, so error out.
-		return 0, 0, "", fmt.Errorf("ambiguous step name %s", fullName(stageName, stepName))
+		return fmt.Errorf("ambiguous step name %s", fullName(stageName, stepName))
 	}
 }
 
