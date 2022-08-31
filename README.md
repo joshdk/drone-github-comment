@@ -21,7 +21,7 @@ Secrets for a `DRONE_TOKEN` as well as a `GITHUB_TOKEN` must be configured.
 ```yaml
 steps:
 - name: drone-github-comment
-  image: ghcr.io/joshdk/drone-github-comment:v0.1.0
+  image: ghcr.io/joshdk/drone-github-comment:v0.3.0
   environment:
     DRONE_TOKEN:
       from_secret: DRONE_TOKEN
@@ -41,7 +41,7 @@ steps:
   - "golangci-lint run ."
 
 - name: drone-github-comment
-  image: ghcr.io/joshdk/drone-github-comment:v0.1.0
+  image: ghcr.io/joshdk/drone-github-comment:v0.3.0
   settings:
     step: build-pull-request/lint-code
     #step: lint-code
@@ -52,7 +52,7 @@ You must also configure the `depends_on` values, since this plugin must be run a
 ```yaml
 steps:
 - name: drone-github-comment
-  image: ghcr.io/joshdk/drone-github-comment:v0.1.0
+  image: ghcr.io/joshdk/drone-github-comment:v0.3.0
   depends_on:
   - lint-code
 ```
@@ -62,7 +62,7 @@ You should also configure the `when` values, since this plugin might be run afte
 ```yaml
 steps:
 - name: drone-github-comment
-  image: ghcr.io/joshdk/drone-github-comment:v0.1.0
+  image: ghcr.io/joshdk/drone-github-comment:v0.3.0
   when:
     status:
       - failure
@@ -74,7 +74,7 @@ To avoid the deletion of out of date comments, you can set `keep` to `true`.
 ```yaml
 steps:
 - name: drone-github-comment
-  image: ghcr.io/joshdk/drone-github-comment:v0.1.0
+  image: ghcr.io/joshdk/drone-github-comment:v0.3.0
   settings:
     keep: true
 ```
@@ -87,7 +87,7 @@ Note that the `when` setting is different to the `when` step property.
 ```yaml
 steps:
 - name: drone-github-comment
-  image: ghcr.io/joshdk/drone-github-comment:v0.1.0
+  image: ghcr.io/joshdk/drone-github-comment:v0.3.0
   settings:
     when: failure
 ```
@@ -99,7 +99,7 @@ To include such lines, you can set `verbatim` to `true`.
 ```yaml
 steps:
 - name: drone-github-comment
-  image: ghcr.io/joshdk/drone-github-comment:v0.1.0
+  image: ghcr.io/joshdk/drone-github-comment:v0.3.0
   settings:
     verbatim: true
 ```
