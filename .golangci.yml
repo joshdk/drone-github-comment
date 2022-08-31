@@ -2,6 +2,8 @@ linters:
   enable-all: true
   disable:
     - cyclop
+    - exhaustivestruct
+    - exhaustruct
     - funlen
     - gocognit
     - gocyclo
@@ -12,6 +14,7 @@ linters:
     - maintidx
     - maligned
     - nlreturn
+    - revive
     - scopelint
     - wrapcheck
     - wsl

@@ -19,7 +19,7 @@ import (
 	"text/template"
 
 	"github.com/drone/drone-go/drone"
-	"github.com/google/go-github/v43/github"
+	"github.com/google/go-github/v47/github"
 	"golang.org/x/oauth2"
 )
 
@@ -54,17 +54,20 @@ var version = "development"
 // commentTemplateRaw is an embedded file which contains a text/template body.
 // Will be used to format logs (and other information) from a DroneCI step as a
 // GitHub markdown comment.
+//
 //go:embed comment.tpl
 var commentTemplateRaw string
 
 // commentTemplate is parsed from the above raw template. Any syntax errors in
 // the template body will result in an immediate panic at runtime.
-// nolint:gochecknoglobals
+//
+//nolint:gochecknoglobals
 var commentTemplate = template.Must(template.New("comment.tpl").Parse(commentTemplateRaw))
 
 // regexMarkdownMetadata is a regex that matches specifically formatted
 // invisible markdown comments of the form:
-//   [//]: # (key=value)
+//
+//	[//]: # (key=value)
 var regexMarkdownMetadata = regexp.MustCompile(`^\[//\]: # \(([^=]+)=(.*)\)`)
 
 func main() {
@@ -75,7 +78,7 @@ func main() {
 }
 
 func mainCmd() error {
-	log.Printf("joshdk/drone-github-comment version %s", version)
+	log.Printf("https://github.com/joshdk/drone-github-comment version %s", version)
 
 	// droneBuildNumber is the number for the current DroneCI build.
 	// Example: 42
@@ -207,7 +210,7 @@ func mainCmd() error {
 	switch parts := strings.Split(pluginStepFull, "/"); len(parts) {
 	case 1:
 		target.StageName, target.StepName = "", parts[0]
-	case 2: // nolint:gomnd
+	case 2: //nolint:gomnd
 		target.StageName, target.StepName = parts[0], parts[1]
 	default:
 		return fmt.Errorf("PLUGIN_STEP was malformed")
@@ -225,14 +228,14 @@ func mainCmd() error {
 	// Construct a DroneCI API client using the provided token, proto, and
 	// hostname.
 	droneTokenClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: droneToken}, // nolint:exhaustivestruct
+		&oauth2.Token{AccessToken: droneToken},
 	))
 	droneServer := fmt.Sprintf("%s://%s", droneSystemProto, droneSystemHostname)
 	droneClient := drone.NewClient(droneServer, droneTokenClient)
 
 	// Construct a GitHub API client using the provided token.
 	githubTokenClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: githubToken}, // nolint:exhaustivestruct
+		&oauth2.Token{AccessToken: githubToken},
 	))
 	githubClient := github.NewClient(githubTokenClient)
 
@@ -379,7 +382,6 @@ func mainCmd() error {
 	log.Printf("templated comment:\n%s", comment)
 
 	// Create a comment on the underlying pull request.
-	// nolint:exhaustivestruct
 	createdComment, _, err := githubClient.Issues.CreateComment(ctx, droneRepoOwner, droneRepoName, dronePullRequestInt, &github.IssueComment{
 		Body: github.String(comment),
 	})
@@ -394,7 +396,8 @@ func mainCmd() error {
 // hasMarkdownLabels checks if the given comment contains all the given
 // labels as markdown metadata. A markdown label is an invisible comment that
 // takes the form:
-//   [//]: # (key=value)
+//
+//	[//]: # (key=value)
 func hasMarkdownLabels(comment string, labels map[string]string) bool {
 	// extracted is a set of key value pairs that were found inside the
 	// markdown comment.
@@ -409,7 +412,7 @@ func hasMarkdownLabels(comment string, labels map[string]string) bool {
 		// key, and the value) then add the key and value to our set of
 		// extracted pairs.
 		match := regexMarkdownMetadata.FindStringSubmatch(line)
-		if len(match) == 3 { // nolint:gomnd
+		if len(match) == 3 { //nolint:gomnd
 			key := strings.TrimSpace(match[1])
 			val := strings.TrimSpace(match[2])
 			extracted[key] = val
