@@ -207,7 +207,7 @@ func mainCmd() error {
 
 	// Spit the stage and step values from the combined plugin setting.
 	var target target
-	switch parts := strings.Split(pluginStepFull, "/"); len(parts) {
+	switch parts := strings.SplitN(pluginStepFull, "/", 2); len(parts) { //nolint:gomnd
 	case 1:
 		target.StageName, target.StepName = "", parts[0]
 	case 2: //nolint:gomnd
